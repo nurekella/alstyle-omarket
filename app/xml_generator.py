@@ -8,6 +8,21 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.models import async_session, Product, Category
 
+# Кэш фида
+_cache = {"xml": None, "time": 0}
+CACHE_TTL = 600  # 10 минут
+
+
+async def get_cached_feed() -> str:
+    import time
+    now = time.time()
+    if _cache["xml"] and (now - _cache["time"]) < CACHE_TTL:
+        return _cache["xml"]
+    xml = await generate_kaspi_feed()
+    _cache["xml"] = xml
+    _cache["time"] = now
+    return xml
+
 logger = logging.getLogger("xml_generator")
 settings = get_settings()
 

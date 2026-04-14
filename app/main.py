@@ -13,7 +13,7 @@ from sqlalchemy import select, func, desc
 from app.config import get_settings
 from app.models import init_db, async_session, Product, SyncLog, Setting, Category
 from app.fetcher import run_sync
-from app.xml_generator import generate_kaspi_feed
+from app.xml_generator import get_cached_feed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("main")
@@ -70,7 +70,7 @@ async def root():
 
 @app.get("/omarket-feed.xml", response_class=Response)
 async def xml_feed():
-    return Response(content=await generate_kaspi_feed(), media_type="application/xml; charset=utf-8", headers={"Cache-Control": "public, max-age=600"})
+    return Response(content=await get_cached_feed(), media_type="application/xml; charset=utf-8", headers={"Cache-Control": "public, max-age=600"})
 
 
 # ───── Auth ─────
