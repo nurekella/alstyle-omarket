@@ -18,6 +18,10 @@ class Category(Base):
     name = Column(String(500), nullable=False)
     parent_id = Column(Integer, nullable=True)
     level = Column(Integer, default=1)
+    left_key = Column(Integer, default=0)
+    right_key = Column(Integer, default=0)
+    elements_count = Column(Integer, default=0)
+    sync_enabled = Column(Boolean, default=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 

@@ -6,7 +6,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.models import async_session, Product
+from app.models import async_session, Product, Category
 
 logger = logging.getLogger("xml_generator")
 settings = get_settings()
@@ -31,6 +31,12 @@ async def generate_kaspi_feed() -> str:
     offers_el = SubElement(root, "offers")
 
     async with async_session() as session:
+        # Получаем ID включённых категорий
+        cat_result = await session.execute(
+            select(Category.id).where(Category.sync_enabled == True)
+        )
+        enabled_ids = {row[0] for row in cat_result.fetchall()}
+
         result = await session.execute(
             select(Product)
             .where(Product.is_active == True)
@@ -41,6 +47,9 @@ async def generate_kaspi_feed() -> str:
         products = result.scalars().all()
 
         for p in products:
+            # Пропускаем товары из отключённых категорий
+            if enabled_ids and p.category_id and p.category_id not in enabled_ids:
+                continue
             sku = str(p.article)[:20]
             offer = SubElement(offers_el, "offer", sku=sku)
 

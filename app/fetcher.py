@@ -18,7 +18,7 @@ ADDITIONAL_FIELDS = "description,brand,images,barcode,warranty,weight"
 
 
 async def fetch_categories():
-    """Загрузить категории из Al-Style."""
+    """Загрузить категории из Al-Style с вычислением parent_id из Nested Sets."""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
             f"{settings.alstyle_api_url}/categories",
@@ -27,15 +27,42 @@ async def fetch_categories():
         resp.raise_for_status()
         categories = resp.json()
 
+    # Сортируем по left для вычисления parent_id
+    categories.sort(key=lambda c: c.get("left", 0))
+
+    # Вычисляем parent_id из nested sets (left/right)
+    stack = []  # [(id, right)]
+    parent_map = {}
+    for cat in categories:
+        left = cat.get("left", 0)
+        right = cat.get("right", 0)
+        # Убираем из стека всё, чей right < текущего left
+        while stack and stack[-1][1] < left:
+            stack.pop()
+        parent_map[cat["id"]] = stack[-1][0] if stack else None
+        stack.append((cat["id"], right))
+
     async with async_session() as session:
         for cat in categories:
+            cat_id = cat["id"]
             stmt = sqlite_insert(Category).values(
-                id=cat["id"],
+                id=cat_id,
                 name=cat["name"],
                 level=cat.get("level", 1),
+                left_key=cat.get("left", 0),
+                right_key=cat.get("right", 0),
+                elements_count=cat.get("elements", 0),
+                parent_id=parent_map.get(cat_id),
             ).on_conflict_do_update(
                 index_elements=["id"],
-                set_={"name": cat["name"], "level": cat.get("level", 1)},
+                set_={
+                    "name": cat["name"],
+                    "level": cat.get("level", 1),
+                    "left_key": cat.get("left", 0),
+                    "right_key": cat.get("right", 0),
+                    "elements_count": cat.get("elements", 0),
+                    "parent_id": parent_map.get(cat_id),
+                },
             )
             await session.execute(stmt)
         await session.commit()
@@ -174,7 +201,7 @@ async def run_sync():
                 .where(SyncLog.id == log_id)
                 .values(
                     status="success",
-                    finished_at=datetime.utcnow(),
+                    finished_at=datetime.now(),
                     products_fetched=total_fetched,
                     products_updated=total_updated,
                 )
@@ -194,7 +221,7 @@ async def run_sync():
                 .where(SyncLog.id == log_id)
                 .values(
                     status="error",
-                    finished_at=datetime.utcnow(),
+                    finished_at=datetime.now(),
                     error_message=str(e),
                 )
             )

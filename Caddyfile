@@ -1,3 +1,8 @@
 pressplay.kz {
-	reverse_proxy app:8000
+	handle /logs* {
+		reverse_proxy dozzle:8080
+	}
+	handle {
+		reverse_proxy app:8000
+	}
 }

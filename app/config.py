@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # SQLite — файл внутри /data (volume)
     db_path: str = "/data/omarket.db"
 
+    # Admin auth
+    admin_password: str = "changeme"
+    secret_key: str = "change-this-secret-key-too"
+
     class Config:
         env_file = ".env"
 
