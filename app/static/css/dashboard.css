@@ -5,7 +5,8 @@ a{color:inherit;text-decoration:none}
 .layout{display:flex;min-height:100vh}
 .sidebar{width:260px;background:#151820;border-right:1px solid #2a2d37;padding:16px 12px;display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 6px 18px;border-bottom:1px solid #2a2d37;margin-bottom:12px}
-.brand-logo{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff}
+.brand-logo{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;box-shadow:0 4px 12px rgba(59,130,246,.25)}
+.brand-logo svg{display:block;margin-left:2px}
 .brand-name{font-weight:600;color:#fff;font-size:15px}
 
 .nav{display:flex;flex-direction:column;gap:2px;flex:1}
