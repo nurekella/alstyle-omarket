@@ -115,6 +115,10 @@ async def generate_kaspi_feed_with_count() -> tuple[str, int]:
                 })
 
             SubElement(offer, "price").text = str(int(p.price_omarket))
+
+            if p.barcode:
+                SubElement(offer, "barcode").text = str(p.barcode).strip()
+
             offers_count += 1
 
     xml_str = tostring(root, encoding="unicode", xml_declaration=False)
