@@ -8,7 +8,8 @@ from sqlalchemy import desc, func, select
 from app.config import get_settings
 from app.brands import extract_brand
 from app.exporters import cache_info, invalidate_cache
-from app.exporters.kaspi import generate_kaspi_feed_with_count
+from app.exporters.kaspi import generate_feed_with_count
+from app.feeds_config import get_feed_config, is_feed_configured, set_feed_config
 from app.exporters.registry import FEEDS, FEEDS_BY_ID
 from app.exporters.xlsx import build_products_xlsx
 from app.models import Blacklist, Category, PriceAlert, Product, SyncLog, async_session
@@ -350,9 +351,13 @@ async def list_feeds(request: Request):
     denied = require_auth(request)
     if denied:
         return denied
-    info = cache_info()
     out = []
     for f in FEEDS:
+        cfg = await get_feed_config(f["id"]) if f["enabled"] else None
+        info = cache_info(f["id"]) if f["enabled"] else {
+            "cached": False, "age_seconds": None, "size_bytes": 0,
+            "offers_count": 0, "ttl_seconds": settings.xml_cache_ttl,
+        }
         item = {
             "id": f["id"],
             "name": f["name"],
@@ -362,17 +367,47 @@ async def list_feeds(request: Request):
             "enabled": f["enabled"],
             "target": f.get("target"),
             "site": f.get("site"),
-            "store_ids": settings.store_ids if f["enabled"] else [],
-            "cached": False,
-            "age_seconds": None,
-            "size_bytes": 0,
-            "offers_count": 0,
-            "ttl_seconds": settings.xml_cache_ttl,
+            "store_ids": cfg["store_ids"] if cfg else [],
+            "merchant_id": cfg["merchant_id"] if cfg else "",
+            "company_name": cfg["company_name"] if cfg else "",
+            "commission_pct": cfg["commission_pct"] if cfg else 0,
+            "min_price": cfg["min_price"] if cfg else 0,
+            "configured": is_feed_configured(cfg) if cfg else False,
+            **info,
         }
-        if f["id"] == "omarket" and f["enabled"]:
-            item.update(info)
         out.append(item)
     return out
+
+
+class FeedConfigUpdate(BaseModel):
+    merchant_id: str | None = None
+    company_name: str | None = None
+    store_ids: list[str] | str | None = None
+    commission_pct: float | None = None
+    min_price: float | None = None
+
+
+@router.get("/feeds/{feed_id}/config")
+async def get_feed_cfg(feed_id: str, request: Request):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    if feed_id not in FEEDS_BY_ID:
+        return JSONResponse({"error": "unknown feed"}, status_code=404)
+    cfg = await get_feed_config(feed_id)
+    return {"feed_id": feed_id, **cfg, "configured": is_feed_configured(cfg)}
+
+
+@router.post("/feeds/{feed_id}/config")
+async def update_feed_cfg(feed_id: str, body: FeedConfigUpdate, request: Request):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    if feed_id not in FEEDS_BY_ID:
+        return JSONResponse({"error": "unknown feed"}, status_code=404)
+    cfg = await set_feed_config(feed_id, body.dict(exclude_none=True))
+    invalidate_cache(feed_id)
+    return {"ok": True, "feed_id": feed_id, **cfg, "configured": is_feed_configured(cfg)}
 
 
 @router.post("/feeds/{feed_id}/refresh")
@@ -380,10 +415,10 @@ async def refresh_feed(feed_id: str, request: Request):
     denied = require_auth(request)
     if denied:
         return denied
-    if feed_id != "omarket":
+    if feed_id not in FEEDS_BY_ID:
         return JSONResponse({"error": "unknown feed"}, status_code=404)
-    invalidate_cache()
-    _, count = await generate_kaspi_feed_with_count()
+    invalidate_cache(feed_id)
+    _, count = await generate_feed_with_count(feed_id)
     return {"ok": True, "offers": count, "refreshed_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -392,9 +427,9 @@ async def preview_feed(feed_id: str, request: Request, limit: int = Query(30, le
     denied = require_auth(request)
     if denied:
         return denied
-    if feed_id != "omarket":
+    if feed_id not in FEEDS_BY_ID:
         return JSONResponse({"error": "unknown feed"}, status_code=404)
-    xml, total = await generate_kaspi_feed_with_count()
+    xml, total = await generate_feed_with_count(feed_id)
     lines = xml.splitlines()
     cutoff = 0
     offer_count = 0

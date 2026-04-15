@@ -430,8 +430,19 @@ route('feed', async function(args, view){
     return;
   }
 
+  var notConfigured = !f.configured;
+  var storeIdsStr = (f.store_ids||[]).join(', ');
+
   view.innerHTML =
-    '<div class="h1">'+esc(f.name)+' <span class="badge">XML-фид</span></div>'+
+    '<div class="h1">'+esc(f.name)+' <span class="badge">XML-фид</span>'+
+      (notConfigured?' <span class="badge soon">требуется настройка</span>':'')+
+    '</div>'+
+
+    (notConfigured ?
+      '<div class="section" style="border-color:#8b5cf6">'+
+        '<div class="h2" style="color:#c4b5fd">⚠ Фид ещё не настроен</div>'+
+        '<div class="hint">Заполните Merchant ID и хотя бы один Store ID ниже — после сохранения фид начнёт работать.</div>'+
+      '</div>' : '')+
 
     '<div class="section">'+
       '<div class="h2">URL фида</div>'+
@@ -444,20 +455,61 @@ route('feed', async function(args, view){
       '</div>'+
     '</div>'+
 
+    '<div class="section">'+
+      '<div class="h2">Настройки фида</div>'+
+      '<div class="hint">Эти значения берутся из кабинета '+esc(f.name)+'. <b>Merchant ID</b> — идентификатор магазина на площадке, <b>Store IDs</b> — POS-коды точек продаж (через запятую).</div>'+
+
+      '<div style="display:grid;grid-template-columns:180px 1fr;gap:10px 14px;margin-top:14px;align-items:center">'+
+        '<label class="muted" style="font-size:13px">Merchant ID</label>'+
+        '<input type="text" id="cfg-merchant" value="'+esc(f.merchant_id||'')+'" placeholder="например: Top1">'+
+
+        '<label class="muted" style="font-size:13px">Company Name</label>'+
+        '<input type="text" id="cfg-company" value="'+esc(f.company_name||'')+'" placeholder="название компании">'+
+
+        '<label class="muted" style="font-size:13px">Store IDs</label>'+
+        '<input type="text" id="cfg-stores" value="'+esc(storeIdsStr)+'" placeholder="PP1, PP2">'+
+
+        '<label class="muted" style="font-size:13px">Комиссия %</label>'+
+        '<input type="number" min="0" max="50" step="0.1" id="cfg-commission" value="'+(f.commission_pct||0)+'" style="width:120px">'+
+
+        '<label class="muted" style="font-size:13px">Мин. цена ₸</label>'+
+        '<input type="number" min="0" step="1" id="cfg-minprice" value="'+(f.min_price||0)+'" style="width:120px">'+
+      '</div>'+
+
+      '<div class="row" style="margin-top:16px">'+
+        '<button onclick="saveFeedConfig(\''+f.id+'\')">💾 Сохранить</button>'+
+        '<button class="ghost" onclick="handleRoute()">Отмена</button>'+
+      '</div>'+
+    '</div>'+
+
     '<div class="grid">'+
       card('Товаров в фиде', fmt(f.offers_count))+
       card('Размер', bytes(f.size_bytes), 'gzip на лету')+
       card('Магазинов', (f.store_ids||[]).length)+
       card('Формат', f.format || '—')+
       card('TTL кэша', (f.ttl_seconds||0)+' сек', f.age_seconds!=null?'возраст: '+f.age_seconds+' сек':'кэш пуст')+
-    '</div>'+
-
-    '<div class="section">'+
-      '<div class="h2">Магазины</div>'+
-      '<div class="help">ID точек продаж, передаются в каждый &lt;availability&gt; в XML.</div>'+
-      '<div style="margin-top:8px">'+(f.store_ids||[]).map(function(s){return '<span class="url-box" style="display:inline-block;margin:4px 4px 0 0;padding:4px 8px">'+esc(s)+'</span>'}).join('')+'</div>'+
     '</div>';
 });
+
+async function saveFeedConfig(feedId){
+  var storesRaw = document.getElementById('cfg-stores').value || '';
+  var stores = storesRaw.split(',').map(function(s){return s.trim()}).filter(Boolean);
+  var body = {
+    merchant_id: document.getElementById('cfg-merchant').value.trim(),
+    company_name: document.getElementById('cfg-company').value.trim(),
+    store_ids: stores,
+    commission_pct: parseFloat(document.getElementById('cfg-commission').value || 0),
+    min_price: parseFloat(document.getElementById('cfg-minprice').value || 0),
+  };
+  var r = await api('/api/feeds/'+feedId+'/config', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (r) {
+    toast(r.configured ? 'Сохранено' : 'Сохранено (нужен Merchant ID и Store IDs)');
+    refreshSidebar();
+    handleRoute();
+  }
+}
 
 async function copyUrl(url){
   try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована') }
