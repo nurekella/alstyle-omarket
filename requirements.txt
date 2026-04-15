@@ -8,3 +8,4 @@ apscheduler==3.10.4
 jinja2==3.1.5
 slowapi==0.1.9
 tenacity==9.0.0
+openpyxl==3.1.5

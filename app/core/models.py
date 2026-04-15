@@ -22,6 +22,7 @@ class Category(Base):
     right_key = Column(Integer, default=0)
     elements_count = Column(Integer, default=0)
     sync_enabled = Column(Boolean, default=True)
+    markup_multiplier = Column(Float, nullable=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -78,6 +79,14 @@ class Setting(Base):
     value = Column(Text, nullable=False)
 
 
+class Blacklist(Base):
+    __tablename__ = "blacklist"
+
+    article = Column(Integer, primary_key=True)
+    reason = Column(String(500), nullable=True)
+    added_at = Column(DateTime, server_default=func.now())
+
+
 settings = get_settings()
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.db_path}",
@@ -97,6 +106,14 @@ def _sqlite_pragmas(dbapi_conn, _):
     cur.close()
 
 
+async def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+    cols = {row[1] for row in res.fetchall()}
+    if column not in cols:
+        await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_column(conn, "categories", "markup_multiplier", "REAL")

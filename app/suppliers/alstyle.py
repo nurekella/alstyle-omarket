@@ -12,6 +12,7 @@ from tenacity import (
 
 from app.config import get_settings
 from app.models import async_session, Product, Category, SyncLog, Setting
+from app.pricing import build_category_markup_map
 
 logger = logging.getLogger("fetcher")
 settings = get_settings()
@@ -108,9 +109,13 @@ async def fetch_products_page(client: httpx.AsyncClient, offset: int = 0):
     )
 
 
-def _product_row(p: dict, markup: float) -> dict:
+def _product_row(p: dict, markup: float, markup_map: dict[int, float] | None = None) -> dict:
     price_dealer = p.get("price1")
-    price_omarket = round(price_dealer * markup) if price_dealer and price_dealer > 1 else None
+    category_id = p.get("category")
+    effective_markup = markup
+    if markup_map and category_id in markup_map:
+        effective_markup = markup_map[category_id]
+    price_omarket = round(price_dealer * effective_markup) if price_dealer and price_dealer > 1 else None
 
     images_json = None
     if p.get("images"):
@@ -145,7 +150,10 @@ async def upsert_products(products: list[dict], markup: float) -> int:
     if not products:
         return 0
 
-    rows = [_product_row(p, markup) for p in products]
+    async with async_session() as session:
+        markup_map = await build_category_markup_map(session)
+
+    rows = [_product_row(p, markup, markup_map) for p in products]
 
     async with async_session() as session:
         for i in range(0, len(rows), DB_CHUNK):
