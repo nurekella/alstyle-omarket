@@ -85,6 +85,11 @@ async function refreshSidebar(){
 
   var sup = document.getElementById('nav-suppliers');
   sup.innerHTML = state.suppliers.map(function(s){
+    if (!s.enabled){
+      return '<a class="nav-item soon" data-route="supplier/'+s.id+'">'+
+        '<span class="nav-ico">📦</span>'+esc(s.name)+
+        '<span class="soon-tag">скоро</span></a>';
+    }
     var dot = s.last_sync_status === 'success' ? 'ok' : (s.last_sync_status === 'error' ? 'err' : (s.last_sync_status === 'running' ? 'warn' : 'off'));
     return '<a class="nav-item" data-route="supplier/'+s.id+'">'+
       '<span class="nav-ico">📦</span>'+esc(s.name)+
@@ -93,6 +98,11 @@ async function refreshSidebar(){
 
   var fd = document.getElementById('nav-feeds');
   fd.innerHTML = state.feeds.map(function(f){
+    if (!f.enabled){
+      return '<a class="nav-item soon" data-route="feed/'+f.id+'">'+
+        '<span class="nav-ico">📤</span>'+esc(f.name)+
+        '<span class="soon-tag">скоро</span></a>';
+    }
     return '<a class="nav-item" data-route="feed/'+f.id+'">'+
       '<span class="nav-ico">📤</span>'+esc(f.name)+
       '<span class="count">'+fmt(f.offers_count||0)+'</span></a>';
@@ -135,18 +145,8 @@ route('home', async function(args, view){
       card('Посл. sync', '<span class="status '+(ls.status||'')+'">'+(ls.status||'—')+'</span>', ls.started_at||'')+
     '</div>'+
 
-    '<div class="section"><div class="h2">Поставщики</div>'+
-      (suppliers||[]).map(function(s){
-        var dot = s.last_sync_status==='success'?'ok':(s.last_sync_status==='error'?'err':'off');
-        return '<div class="supplier-card" onclick="navigate(\'#/supplier/'+s.id+'\')">'+
-          '<div class="supplier-icon">'+s.name.substring(0,2).toUpperCase()+'</div>'+
-          '<div class="supplier-info">'+
-            '<div class="supplier-name">'+esc(s.name)+' <span class="dot '+dot+'"></span></div>'+
-            '<div class="supplier-stats">'+fmt(s.products_total)+' товаров · '+fmt(s.products_in_stock)+' в наличии · sync каждые '+s.sync_interval_minutes+' мин</div>'+
-          '</div>'+
-          '<button class="ghost sm">Открыть →</button>'+
-        '</div>';
-      }).join('')+
+    '<div class="section"><div class="h2">Поставщики <span class="muted" style="font-size:11px;font-weight:400">'+(suppliers||[]).filter(function(s){return s.enabled}).length+' активных, '+(suppliers||[]).filter(function(s){return !s.enabled}).length+' в планах</span></div>'+
+      (suppliers||[]).map(supplierCard).join('')+
     '</div>'+
 
     '<div class="section"><div class="h2">XML-фиды</div>'+
@@ -154,11 +154,42 @@ route('home', async function(args, view){
     '</div>';
 });
 
+function supplierCard(s){
+  if (!s.enabled){
+    return '<div class="supplier-card soon" onclick="navigate(\'#/supplier/'+s.id+'\')" title="Откроется страница-заглушка">'+
+      '<div class="supplier-icon" style="background:linear-gradient(135deg,#555,#333)">'+s.name.substring(0,2).toUpperCase()+'</div>'+
+      '<div class="supplier-info">'+
+        '<div class="supplier-name">'+esc(s.name)+' <span class="badge soon">скоро</span></div>'+
+        '<div class="supplier-stats">'+esc(s.url||'')+'</div>'+
+      '</div>'+
+      '<button class="ghost sm" disabled>—</button>'+
+    '</div>';
+  }
+  var dot = s.last_sync_status==='success'?'ok':(s.last_sync_status==='error'?'err':'off');
+  return '<div class="supplier-card" onclick="navigate(\'#/supplier/'+s.id+'\')">'+
+    '<div class="supplier-icon">'+s.name.substring(0,2).toUpperCase()+'</div>'+
+    '<div class="supplier-info">'+
+      '<div class="supplier-name">'+esc(s.name)+' <span class="dot '+dot+'"></span></div>'+
+      '<div class="supplier-stats">'+fmt(s.products_total)+' товаров · '+fmt(s.products_in_stock)+' в наличии · sync каждые '+s.sync_interval_minutes+' мин</div>'+
+    '</div>'+
+    '<button class="ghost sm">Открыть →</button>'+
+  '</div>';
+}
+
 function card(h, v, sub, cls){
   return '<div class="card"><h3>'+esc(h)+'</h3><div class="val '+(cls||'')+'">'+v+'</div>'+(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div>';
 }
 
 function feedMini(f){
+  if (!f.enabled){
+    return '<div class="feed-card soon">'+
+      '<div class="feed-head">'+
+        '<div class="feed-title">📤 '+esc(f.name)+' <span class="badge soon">скоро</span></div>'+
+        '<button class="ghost sm" onclick="navigate(\'#/feed/'+f.id+'\')">Подробнее</button>'+
+      '</div>'+
+      '<div class="help">Целевая площадка: '+esc(f.target||'')+'. Формат: '+esc(f.format||'')+'.</div>'+
+    '</div>';
+  }
   return '<div class="feed-card">'+
     '<div class="feed-head">'+
       '<div class="feed-title">📤 '+esc(f.name)+'</div>'+
@@ -180,6 +211,19 @@ route('supplier', async function(args, view){
   if (!s){ view.innerHTML = '<div class="text-red">Поставщик не найден</div>'; return }
 
   setCrumbs([{text:'Поставщики', href:'home'}, {text:s.name}]);
+
+  if (!s.enabled){
+    view.innerHTML =
+      '<div class="h1">'+esc(s.name)+' <span class="badge soon">скоро</span></div>'+
+      '<div class="section">'+
+        '<div class="h2">Интеграция в работе</div>'+
+        '<div class="hint">Этот поставщик пока не подключён. Когда появится API-ключ и спецификация, добавим синхронизацию товаров и категорий.</div>'+
+        '<div style="margin-top:14px"><b>Сайт:</b> <a href="'+esc(s.url||'#')+'" target="_blank" style="color:#3b82f6">'+esc(s.url||'')+'</a></div>'+
+        '<div style="margin-top:8px;color:#888;font-size:12px">ID в системе: <code style="background:#0f1117;padding:2px 6px;border-radius:4px">'+esc(s.id)+'</code></div>'+
+      '</div>';
+    return;
+  }
+
   view.innerHTML =
     '<div class="h1">'+esc(s.name)+' <span class="badge">Поставщик</span></div>'+
 
@@ -371,6 +415,21 @@ route('feed', async function(args, view){
   var f = (feeds||[]).find(function(x){return x.id===id});
   if (!f){ view.innerHTML = '<div class="text-red">Фид не найден</div>'; return }
   setCrumbs([{text:'XML-фиды', href:'home'}, {text:f.name}]);
+
+  if (!f.enabled){
+    view.innerHTML =
+      '<div class="h1">'+esc(f.name)+' <span class="badge soon">скоро</span></div>'+
+      '<div class="section">'+
+        '<div class="h2">Фид в разработке</div>'+
+        '<div class="hint">Когда фид будет готов — здесь появятся URL, preview, статистика и кнопки управления как у активных фидов.</div>'+
+        '<div style="margin-top:14px;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px">'+
+          '<b>Целевая площадка:</b><span>'+esc(f.target||'—')+'</span>'+
+          '<b>Формат:</b><span>'+esc(f.format||'—')+'</span>'+
+          '<b>ID:</b><code style="background:#0f1117;padding:2px 6px;border-radius:4px;width:fit-content">'+esc(f.id)+'</code>'+
+        '</div>'+
+      '</div>';
+    return;
+  }
 
   view.innerHTML =
     '<div class="h1">'+esc(f.name)+' <span class="badge">XML-фид</span></div>'+

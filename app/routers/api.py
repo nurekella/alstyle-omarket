@@ -8,6 +8,7 @@ from sqlalchemy import desc, func, select
 from app.config import get_settings
 from app.exporters import cache_info, invalidate_cache
 from app.exporters.kaspi import generate_kaspi_feed_with_count
+from app.exporters.registry import FEEDS, FEEDS_BY_ID
 from app.exporters.xlsx import build_products_xlsx
 from app.models import Blacklist, Category, Product, SyncLog, async_session
 from app.pricing import build_category_markup_map
@@ -15,6 +16,7 @@ from app.scheduler import scheduler
 from app.security import require_auth
 from app.settings_store import get_markup, get_setting, set_setting
 from app.suppliers import run_sync
+from app.suppliers.registry import SUPPLIERS, SUPPLIERS_BY_ID
 
 router = APIRouter(prefix="/api")
 settings = get_settings()
@@ -266,18 +268,41 @@ async def list_suppliers(request: Request):
         last = (await session.execute(
             select(SyncLog).order_by(desc(SyncLog.id)).limit(1)
         )).scalar_one_or_none()
-    return [
-        {
-            "id": "alstyle",
-            "name": "Al-Style",
-            "enabled": True,
-            "products_total": total,
-            "products_in_stock": in_stock,
-            "last_sync_status": last.status if last else None,
-            "last_sync_at": str(last.started_at) if last else None,
-            "sync_interval_minutes": settings.sync_interval_minutes,
-        },
-    ]
+
+    out = []
+    for s in SUPPLIERS:
+        item = {
+            "id": s["id"],
+            "name": s["name"],
+            "url": s["url"],
+            "enabled": s["enabled"],
+            "products_total": 0,
+            "products_in_stock": 0,
+            "last_sync_status": None,
+            "last_sync_at": None,
+            "sync_interval_minutes": None,
+        }
+        if s["id"] == "alstyle" and s["enabled"]:
+            item.update({
+                "products_total": total,
+                "products_in_stock": in_stock,
+                "last_sync_status": last.status if last else None,
+                "last_sync_at": str(last.started_at) if last else None,
+                "sync_interval_minutes": settings.sync_interval_minutes,
+            })
+        out.append(item)
+    return out
+
+
+@router.get("/suppliers/{supplier_id}")
+async def get_supplier(supplier_id: str, request: Request):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    s = SUPPLIERS_BY_ID.get(supplier_id)
+    if not s:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return s
 
 
 # ───── Feeds ─────
@@ -288,18 +313,27 @@ async def list_feeds(request: Request):
     if denied:
         return denied
     info = cache_info()
-    return [
-        {
-            "id": "omarket",
-            "name": "OMarket",
-            "url_path": "/omarket-feed.xml",
-            "absolute_url": f"https://{settings.feed_domain}/omarket-feed.xml",
-            "format": "Kaspi XML",
-            "enabled": True,
-            "store_ids": settings.store_ids,
-            **info,
-        },
-    ]
+    out = []
+    for f in FEEDS:
+        item = {
+            "id": f["id"],
+            "name": f["name"],
+            "format": f["format"],
+            "url_path": f["url_path"],
+            "absolute_url": f"https://{settings.feed_domain}{f['url_path']}" if f["url_path"] else None,
+            "enabled": f["enabled"],
+            "target": f.get("target"),
+            "store_ids": settings.store_ids if f["enabled"] else [],
+            "cached": False,
+            "age_seconds": None,
+            "size_bytes": 0,
+            "offers_count": 0,
+            "ttl_seconds": settings.xml_cache_ttl,
+        }
+        if f["id"] == "omarket" and f["enabled"]:
+            item.update(info)
+        out.append(item)
+    return out
 
 
 @router.post("/feeds/{feed_id}/refresh")
