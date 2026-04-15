@@ -6,7 +6,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.exporters.registry import FEEDS_BY_ID
+from app.exporters.registry import get_feed_meta
 from app.feeds_config import get_feed_config, is_feed_configured
 from app.models import async_session, Product, Category, Blacklist
 
@@ -60,7 +60,7 @@ def _apply_commission(price: float, commission_pct: float) -> int:
 
 async def generate_feed_with_count(feed_id: str = "omarket") -> tuple[str, int]:
     cfg = await get_feed_config(feed_id)
-    meta = FEEDS_BY_ID.get(feed_id) or {}
+    meta = await get_feed_meta(feed_id) or {}
     strict = bool(meta.get("strict_xsd"))
 
     # If feed isn't configured, return a minimal "not configured" document

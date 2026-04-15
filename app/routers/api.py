@@ -10,7 +10,10 @@ from app.brands import extract_brand
 from app.exporters import cache_info, invalidate_cache
 from app.exporters.kaspi import generate_feed_with_count
 from app.feeds_config import get_feed_config, is_feed_configured, set_feed_config
-from app.exporters.registry import FEEDS, FEEDS_BY_ID
+from app.exporters.registry import (
+    BUILTIN_IDS, all_feeds, get_feed_meta, is_valid_slug, slug_path,
+)
+from app.models import CustomFeed
 from app.exporters.xlsx import build_products_xlsx
 from app.models import Blacklist, Category, PriceAlert, Product, SyncLog, async_session
 from app.pricing import build_category_markup_map
@@ -352,7 +355,7 @@ async def list_feeds(request: Request):
     if denied:
         return denied
     out = []
-    for f in FEEDS:
+    for f in await all_feeds():
         cfg = await get_feed_config(f["id"]) if f["enabled"] else None
         info = cache_info(f["id"]) if f["enabled"] else {
             "cached": False, "age_seconds": None, "size_bytes": 0,
@@ -367,6 +370,8 @@ async def list_feeds(request: Request):
             "enabled": f["enabled"],
             "target": f.get("target"),
             "site": f.get("site"),
+            "custom": bool(f.get("custom")),
+            "strict_xsd": bool(f.get("strict_xsd")),
             "store_ids": cfg["store_ids"] if cfg else [],
             "merchant_id": cfg["merchant_id"] if cfg else "",
             "company_name": cfg["company_name"] if cfg else "",
@@ -377,6 +382,62 @@ async def list_feeds(request: Request):
         }
         out.append(item)
     return out
+
+
+class CustomFeedCreate(BaseModel):
+    id: str
+    name: str
+    target: str | None = None
+    site: str | None = None
+    strict_xsd: bool = False
+
+
+@router.post("/feeds/custom")
+async def create_custom_feed(body: CustomFeedCreate, request: Request):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    slug = body.id.strip().lower()
+    if not is_valid_slug(slug):
+        return JSONResponse(
+            {"error": "id must be 2-40 chars, lowercase latin/digits/dash, not collide with built-ins"},
+            status_code=400,
+        )
+    if not body.name.strip():
+        return JSONResponse({"error": "name required"}, status_code=400)
+
+    async with async_session() as session:
+        existing = await session.get(CustomFeed, slug)
+        if existing:
+            return JSONResponse({"error": "feed with this id already exists"}, status_code=409)
+        row = CustomFeed(
+            id=slug,
+            name=body.name.strip(),
+            target=(body.target or "").strip() or None,
+            site=(body.site or "").strip() or None,
+            strict_xsd=bool(body.strict_xsd),
+        )
+        session.add(row)
+        await session.commit()
+
+    return {"ok": True, "id": slug, "url_path": slug_path(slug)}
+
+
+@router.delete("/feeds/custom/{feed_id}")
+async def delete_custom_feed(feed_id: str, request: Request):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    if feed_id in BUILTIN_IDS:
+        return JSONResponse({"error": "cannot delete built-in feed"}, status_code=400)
+    async with async_session() as session:
+        row = await session.get(CustomFeed, feed_id)
+        if not row:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        await session.delete(row)
+        await session.commit()
+    invalidate_cache(feed_id)
+    return {"ok": True, "id": feed_id}
 
 
 class FeedConfigUpdate(BaseModel):
@@ -392,7 +453,7 @@ async def get_feed_cfg(feed_id: str, request: Request):
     denied = require_auth(request)
     if denied:
         return denied
-    if feed_id not in FEEDS_BY_ID:
+    if not await get_feed_meta(feed_id):
         return JSONResponse({"error": "unknown feed"}, status_code=404)
     cfg = await get_feed_config(feed_id)
     return {"feed_id": feed_id, **cfg, "configured": is_feed_configured(cfg)}
@@ -403,7 +464,7 @@ async def update_feed_cfg(feed_id: str, body: FeedConfigUpdate, request: Request
     denied = require_auth(request)
     if denied:
         return denied
-    if feed_id not in FEEDS_BY_ID:
+    if not await get_feed_meta(feed_id):
         return JSONResponse({"error": "unknown feed"}, status_code=404)
     cfg = await set_feed_config(feed_id, body.dict(exclude_none=True))
     invalidate_cache(feed_id)
@@ -415,7 +476,7 @@ async def refresh_feed(feed_id: str, request: Request):
     denied = require_auth(request)
     if denied:
         return denied
-    if feed_id not in FEEDS_BY_ID:
+    if not await get_feed_meta(feed_id):
         return JSONResponse({"error": "unknown feed"}, status_code=404)
     invalidate_cache(feed_id)
     _, count = await generate_feed_with_count(feed_id)
@@ -427,7 +488,7 @@ async def preview_feed(feed_id: str, request: Request, limit: int = Query(30, le
     denied = require_auth(request)
     if denied:
         return denied
-    if feed_id not in FEEDS_BY_ID:
+    if not await get_feed_meta(feed_id):
         return JSONResponse({"error": "unknown feed"}, status_code=404)
     xml, total = await generate_feed_with_count(feed_id)
     lines = xml.splitlines()

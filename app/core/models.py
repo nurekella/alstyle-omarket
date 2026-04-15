@@ -101,6 +101,17 @@ class PriceAlert(Base):
     resolved = Column(Boolean, default=False)
 
 
+class CustomFeed(Base):
+    __tablename__ = "custom_feeds"
+
+    id = Column(String(64), primary_key=True)
+    name = Column(String(200), nullable=False)
+    target = Column(String(200), nullable=True)
+    site = Column(String(500), nullable=True)
+    strict_xsd = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 settings = get_settings()
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.db_path}",

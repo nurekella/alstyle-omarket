@@ -149,10 +149,75 @@ route('home', async function(args, view){
       (suppliers||[]).map(supplierCard).join('')+
     '</div>'+
 
-    '<div class="section"><div class="h2">XML-фиды</div>'+
+    '<div class="section"><div class="h2">XML-фиды <button class="sm" onclick="openNewFeedModal()">➕ Добавить фид</button></div>'+
       (feeds||[]).map(feedMini).join('')+
     '</div>';
 });
+
+function openNewFeedModal(){
+  modal(
+    '<h3>Новый XML-фид <button class="ghost sm" onclick="closeModal()">✕</button></h3>'+
+    '<div class="hint">Создаёт новый URL-адрес фида в формате Kaspi XML. Merchant ID / Store IDs / комиссию настроите после создания на странице фида.</div>'+
+    '<div style="display:grid;grid-template-columns:180px 1fr;gap:10px 14px;margin-top:16px;align-items:center">'+
+      '<label class="muted" style="font-size:13px">ID (slug)</label>'+
+      '<div><input type="text" id="nf-id" placeholder="например: omarket3" style="font-family:ui-monospace,monospace">'+
+        '<div class="help">Латиница, цифры, дефис. URL получится: <code id="nf-url-preview" style="background:#0f1117;padding:2px 6px;border-radius:4px">/feed-&lt;id&gt;.xml</code></div></div>'+
+
+      '<label class="muted" style="font-size:13px">Название</label>'+
+      '<input type="text" id="nf-name" placeholder="например: OMarket Третий">'+
+
+      '<label class="muted" style="font-size:13px">Целевая площадка</label>'+
+      '<input type="text" id="nf-target" placeholder="например: OMarket.kz (аккаунт 3)">'+
+
+      '<label class="muted" style="font-size:13px">Сайт</label>'+
+      '<input type="text" id="nf-site" placeholder="https://...">'+
+
+      '<label class="muted" style="font-size:13px">Строгий XSD</label>'+
+      '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="nf-strict"> Включить для Kaspi (без barcode/productCode)</label>'+
+    '</div>'+
+    '<div class="row" style="margin-top:18px">'+
+      '<button onclick="createCustomFeed()">Создать</button>'+
+      '<button class="ghost" onclick="closeModal()">Отмена</button>'+
+    '</div>'
+  );
+  var input = document.getElementById('nf-id');
+  input.addEventListener('input', function(){
+    var v = (input.value||'').toLowerCase().replace(/[^a-z0-9-]/g,'');
+    input.value = v;
+    document.getElementById('nf-url-preview').textContent = v ? ('/feed-'+v+'.xml') : '/feed-<id>.xml';
+  });
+  input.focus();
+}
+
+async function createCustomFeed(){
+  var body = {
+    id: (document.getElementById('nf-id').value||'').trim(),
+    name: (document.getElementById('nf-name').value||'').trim(),
+    target: (document.getElementById('nf-target').value||'').trim(),
+    site: (document.getElementById('nf-site').value||'').trim(),
+    strict_xsd: document.getElementById('nf-strict').checked,
+  };
+  if (!body.id || !body.name){ toast('ID и название обязательны', false); return }
+  var r = await api('/api/feeds/custom', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (r) {
+    toast('Фид создан');
+    closeModal();
+    refreshSidebar();
+    navigate('#/feed/' + r.id);
+  }
+}
+
+async function deleteCustomFeed(feedId, name){
+  if (!confirm('Удалить фид "'+name+'"?\nURL перестанет отвечать, но сами товары и настройки (merchant/stores/commission) останутся в БД — можно создать заново с тем же id.')) return;
+  var r = await api('/api/feeds/custom/'+feedId, {method:'DELETE'});
+  if (r) {
+    toast('Удалено');
+    refreshSidebar();
+    navigate('#/home');
+  }
+}
 
 function supplierCard(s){
   if (!s.enabled){
@@ -436,6 +501,8 @@ route('feed', async function(args, view){
   view.innerHTML =
     '<div class="h1">'+esc(f.name)+' <span class="badge">XML-фид</span>'+
       (notConfigured?' <span class="badge soon">требуется настройка</span>':'')+
+      (f.custom?' <span class="badge">custom</span>':'')+
+      (f.custom?' <button class="danger sm" style="margin-left:auto" onclick="deleteCustomFeed(\''+f.id+'\',\''+esc(f.name).replace(/'/g,"\\'")+'\')">🗑 Удалить фид</button>':'')+
     '</div>'+
 
     (notConfigured ?
