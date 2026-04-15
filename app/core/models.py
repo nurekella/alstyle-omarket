@@ -52,6 +52,8 @@ class Product(Base):
     price_markdown = Column(Float, nullable=True)
 
     is_active = Column(Boolean, default=True)
+    price_frozen = Column(Boolean, default=False)
+    source_hash = Column(String(64), nullable=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
@@ -87,6 +89,18 @@ class Blacklist(Base):
     added_at = Column(DateTime, server_default=func.now())
 
 
+class PriceAlert(Base):
+    __tablename__ = "price_alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    article = Column(Integer, nullable=False, index=True)
+    old_price = Column(Float, nullable=True)
+    new_price = Column(Float, nullable=True)
+    pct_change = Column(Float, nullable=True)
+    detected_at = Column(DateTime, server_default=func.now())
+    resolved = Column(Boolean, default=False)
+
+
 settings = get_settings()
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.db_path}",
@@ -117,3 +131,5 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_column(conn, "categories", "markup_multiplier", "REAL")
+        await _ensure_column(conn, "products", "price_frozen", "INTEGER DEFAULT 0")
+        await _ensure_column(conn, "products", "source_hash", "TEXT")

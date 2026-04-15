@@ -50,7 +50,23 @@ services:
         limits:
           memory: 64M
 
+  backup:
+    image: alpine:3.20
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Almaty
+    volumes:
+      - appdata:/data:ro
+      - backups:/backups
+      - ./scripts:/scripts:ro
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache sqlite tzdata >/dev/null && exec /scripts/backup-entrypoint.sh"]
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+
 volumes:
   appdata:
   caddy_data:
   caddy_config:
+  backups:

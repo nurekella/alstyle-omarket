@@ -10,7 +10,7 @@ from app.exporters import cache_info, invalidate_cache
 from app.exporters.kaspi import generate_kaspi_feed_with_count
 from app.exporters.registry import FEEDS, FEEDS_BY_ID
 from app.exporters.xlsx import build_products_xlsx
-from app.models import Blacklist, Category, Product, SyncLog, async_session
+from app.models import Blacklist, Category, PriceAlert, Product, SyncLog, async_session
 from app.pricing import build_category_markup_map
 from app.scheduler import scheduler
 from app.security import require_auth
@@ -42,6 +42,12 @@ async def health(request: Request):
         blacklist_count = (await session.execute(
             select(func.count(Blacklist.article))
         )).scalar() or 0
+        open_alerts = (await session.execute(
+            select(func.count(PriceAlert.id)).where(PriceAlert.resolved == False)
+        )).scalar() or 0
+        frozen = (await session.execute(
+            select(func.count(Product.article)).where(Product.price_frozen == True)
+        )).scalar() or 0
         last = (await session.execute(
             select(SyncLog).order_by(desc(SyncLog.id)).limit(1)
         )).scalar_one_or_none()
@@ -53,7 +59,12 @@ async def health(request: Request):
         "categories_total": cats_total,
         "categories_enabled": cats_enabled,
         "blacklist_count": blacklist_count,
+        "open_alerts": open_alerts,
+        "frozen_products": frozen,
         "min_price": float(await get_setting("min_price", "0") or 0),
+        "min_dealer_price": float(await get_setting("min_dealer_price", "0") or 0),
+        "price_anomaly_pct": float(await get_setting("price_anomaly_pct", "50") or 50),
+        "commission_omarket": float(await get_setting("commission_omarket", "0") or 0),
         "last_sync": {
             "id": last.id,
             "status": last.status,
@@ -223,6 +234,7 @@ async def list_products(
                 "price_omarket": p.price_omarket, "quantity": p.quantity,
                 "category_id": p.category_id,
                 "blacklisted": p.article in blacklisted,
+                "frozen": bool(p.price_frozen),
             }
             for p in products
         ],
@@ -437,34 +449,110 @@ async def remove_blacklist(article: int, request: Request):
     return {"ok": True, "article": article}
 
 
-# ───── Settings: min_price ─────
+# ───── Settings ─────
 
-class MinPriceUpdate(BaseModel):
+class ValueUpdate(BaseModel):
     value: float
 
 
-@router.get("/settings/min_price")
-async def get_min_price(request: Request):
+SETTING_BOUNDS = {
+    "min_price": (0.0, 1_000_000.0),
+    "min_dealer_price": (0.0, 1_000_000.0),
+    "price_anomaly_pct": (0.0, 100.0),
+    "commission_omarket": (0.0, 50.0),
+}
+
+
+@router.get("/settings/{key}")
+async def get_any_setting(key: str, request: Request):
     denied = require_auth(request)
     if denied:
         return denied
-    val = await get_setting("min_price", "0")
+    if key not in SETTING_BOUNDS:
+        return JSONResponse({"error": "unknown key"}, status_code=404)
+    val = await get_setting(key, "0")
     try:
-        return {"value": float(val)}
+        return {"key": key, "value": float(val)}
     except ValueError:
-        return {"value": 0.0}
+        return {"key": key, "value": 0.0}
 
 
-@router.post("/settings/min_price")
-async def set_min_price(body: MinPriceUpdate, request: Request):
+@router.post("/settings/{key}")
+async def set_any_setting(key: str, body: ValueUpdate, request: Request):
     denied = require_auth(request)
     if denied:
         return denied
-    if body.value < 0:
-        return JSONResponse({"error": "value must be >= 0"}, status_code=400)
-    await set_setting("min_price", str(body.value))
+    if key not in SETTING_BOUNDS:
+        return JSONResponse({"error": "unknown key"}, status_code=404)
+    lo, hi = SETTING_BOUNDS[key]
+    if not (lo <= body.value <= hi):
+        return JSONResponse({"error": f"value must be {lo}..{hi}"}, status_code=400)
+    await set_setting(key, str(body.value))
     invalidate_cache()
-    return {"ok": True, "value": body.value}
+    return {"ok": True, "key": key, "value": body.value}
+
+
+# ───── Price alerts ─────
+
+class ResolveAlert(BaseModel):
+    action: str  # "unfreeze" | "ignore"
+
+
+@router.get("/alerts")
+async def list_alerts(request: Request, only_open: bool = True, limit: int = Query(50, le=200)):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    async with async_session() as session:
+        q = select(PriceAlert, Product.name).join(
+            Product, Product.article == PriceAlert.article, isouter=True,
+        ).order_by(desc(PriceAlert.id)).limit(limit)
+        if only_open:
+            q = q.where(PriceAlert.resolved == False)
+        rows = (await session.execute(q)).all()
+    return [
+        {
+            "id": a.id,
+            "article": a.article,
+            "name": name or "",
+            "old_price": a.old_price,
+            "new_price": a.new_price,
+            "pct_change": a.pct_change,
+            "detected_at": str(a.detected_at),
+            "resolved": a.resolved,
+        }
+        for a, name in rows
+    ]
+
+
+@router.post("/alerts/{alert_id}/resolve")
+async def resolve_alert(alert_id: int, body: ResolveAlert, request: Request):
+    denied = require_auth(request)
+    if denied:
+        return denied
+    async with async_session() as session:
+        alert = (await session.execute(
+            select(PriceAlert).where(PriceAlert.id == alert_id)
+        )).scalar_one_or_none()
+        if not alert:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        alert.resolved = True
+        if body.action == "unfreeze":
+            product = (await session.execute(
+                select(Product).where(Product.article == alert.article)
+            )).scalar_one_or_none()
+            if product:
+                product.price_frozen = False
+                if alert.new_price:
+                    product.price_dealer = alert.new_price
+                    markup_map = await build_category_markup_map(session)
+                    global_markup = await get_markup()
+                    m = (markup_map.get(product.category_id, global_markup)
+                         if product.category_id else global_markup)
+                    product.price_omarket = round(alert.new_price * m)
+        await session.commit()
+    invalidate_cache()
+    return {"ok": True, "action": body.action}
 
 
 # ───── Excel export ─────

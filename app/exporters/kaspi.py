@@ -50,6 +50,22 @@ async def _get_min_price() -> float:
         return 0.0
 
 
+async def _get_commission() -> float:
+    """OMarket commission in %, 0..50. Raised price = base / (1 - c/100)."""
+    raw = await get_setting("commission_omarket", "0")
+    try:
+        val = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, min(50.0, val))
+
+
+def _apply_commission(price: float, commission_pct: float) -> int:
+    if commission_pct <= 0:
+        return int(round(price))
+    return int(round(price / (1 - commission_pct / 100)))
+
+
 async def generate_kaspi_feed() -> str:
     xml, _ = await generate_kaspi_feed_with_count()
     return xml
@@ -72,6 +88,7 @@ async def generate_kaspi_feed_with_count() -> tuple[str, int]:
     offers_count = 0
 
     min_price = await _get_min_price()
+    commission = await _get_commission()
 
     async with async_session() as session:
         enabled_ids = {
@@ -114,7 +131,8 @@ async def generate_kaspi_feed_with_count() -> tuple[str, int]:
                     "stockCount": str(qty),
                 })
 
-            SubElement(offer, "price").text = str(int(p.price_omarket))
+            final_price = _apply_commission(p.price_omarket, commission)
+            SubElement(offer, "price").text = str(final_price)
 
             if p.barcode:
                 SubElement(offer, "barcode").text = str(p.barcode).strip()

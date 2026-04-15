@@ -480,8 +480,7 @@ async function feedPreview(id){
 route('settings', async function(args, view){
   setCrumbs([{text:'Настройки'}]);
   var h = await api('/api/health');
-  var mp = await api('/api/settings/min_price');
-  if (!h || !mp) return;
+  if (!h) return;
   var pct = ((h.markup-1)*100).toFixed(0);
 
   view.innerHTML =
@@ -489,7 +488,7 @@ route('settings', async function(args, view){
 
     '<div class="section">'+
       '<div class="h2">Глобальная наценка</div>'+
-      '<div class="hint">Применяется к товарам, если у их категории не задана своя наценка.</div>'+
+      '<div class="hint">Применяется к товарам, если у их категории не задана своя наценка. Наценка — <b>валовая</b>, комиссия площадки добавляется поверх в XML-фиде.</div>'+
       '<div class="row end">'+
         '<div><input type="number" id="markup" min="0" max="500" step="1" value="'+pct+'"><span class="muted" style="margin-left:6px">%</span></div>'+
         '<button onclick="setMarkup()">Применить</button>'+
@@ -497,12 +496,37 @@ route('settings', async function(args, view){
     '</div>'+
 
     '<div class="section">'+
-      '<div class="h2">Минимальная цена в XML</div>'+
-      '<div class="hint">Товары с OMarket-ценой ниже этого порога не попадают в фид. Пусто/0 = без фильтра.</div>'+
+      '<div class="h2">Комиссия маркетплейса (OMarket)</div>'+
+      '<div class="hint">Цена в XML = <code>price_omarket × 1/(1-c/100)</code>. При 8% из 1000 ₸ в фид уйдёт 1087 ₸ — ваш чистый остаток остаётся 1000 ₸. Меняйте под условия договора с площадкой.</div>'+
       '<div class="row end">'+
-        '<div><input type="number" id="min-price" min="0" step="1" value="'+(mp.value||0)+'"><span class="muted" style="margin-left:6px">₸</span></div>'+
-        '<button onclick="setMinPrice()">Сохранить</button>'+
+        '<div><input type="number" id="commission" min="0" max="50" step="0.1" value="'+(h.commission_omarket||0)+'"><span class="muted" style="margin-left:6px">%</span></div>'+
+        '<button onclick="setCommission()">Сохранить</button>'+
       '</div>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<div class="h2">Минимальная цена в XML</div>'+
+      '<div class="hint">Товары с OMarket-ценой ниже этого порога не попадают в фид. 0 = без фильтра.</div>'+
+      '<div class="row end">'+
+        '<div><input type="number" id="min-price" min="0" step="1" value="'+(h.min_price||0)+'"><span class="muted" style="margin-left:6px">₸</span></div>'+
+        '<button onclick="setSetting(\'min_price\',\'min-price\')">Сохранить</button>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<div class="h2">Защита от битых цен</div>'+
+      '<div class="hint">Если закупочная цена поставщика меняется резче этого порога — товар замораживается (остаётся со старой ценой) и попадает в раздел «Аномалии цен» для ручной проверки.</div>'+
+      '<div class="row end" style="margin-bottom:10px">'+
+        '<span class="muted" style="min-width:180px">Порог изменения цены:</span>'+
+        '<div><input type="number" id="anomaly" min="0" max="100" step="1" value="'+(h.price_anomaly_pct||50)+'"><span class="muted" style="margin-left:6px">%</span></div>'+
+        '<button onclick="setSetting(\'price_anomaly_pct\',\'anomaly\')">Сохранить</button>'+
+      '</div>'+
+      '<div class="row end">'+
+        '<span class="muted" style="min-width:180px">Мин. закупочная цена:</span>'+
+        '<div><input type="number" id="min-dealer" min="0" step="1" value="'+(h.min_dealer_price||0)+'"><span class="muted" style="margin-left:6px">₸</span></div>'+
+        '<button onclick="setSetting(\'min_dealer_price\',\'min-dealer\')">Сохранить</button>'+
+      '</div>'+
+      '<div class="help">Замороженных сейчас: <b>'+fmt(h.frozen_products||0)+'</b> · Открытых алертов: <b>'+fmt(h.open_alerts||0)+'</b></div>'+
     '</div>'+
 
     '<div class="section">'+
@@ -521,11 +545,18 @@ async function setMarkup(){
   if (r) { toast('Наценка '+pct+'%, пересчитано '+r.recalculated); refreshSidebar() }
 }
 
-async function setMinPrice(){
-  var v = parseFloat(document.getElementById('min-price').value || 0);
-  if (isNaN(v) || v<0){ toast('Введите число', false); return }
-  var r = await api('/api/settings/min_price', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({value: v})});
-  if (r) { toast('Мин. цена: '+v+' ₸'); refreshSidebar() }
+async function setCommission(){
+  var v = parseFloat(document.getElementById('commission').value || 0);
+  if (isNaN(v) || v<0 || v>50){ toast('0..50', false); return }
+  var r = await api('/api/settings/commission_omarket', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({value: v})});
+  if (r) { toast('Комиссия: '+v+'% (пересчёт XML при следующем запросе)'); refreshSidebar() }
+}
+
+async function setSetting(key, inputId){
+  var v = parseFloat(document.getElementById(inputId).value || 0);
+  if (isNaN(v) || v<0){ toast('Введите число ≥ 0', false); return }
+  var r = await api('/api/settings/'+key, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({value: v})});
+  if (r) { toast('Сохранено: '+v); refreshSidebar() }
 }
 
 // ─── BLACKLIST ───────────────────────────────────────────────
@@ -571,6 +602,52 @@ async function blacklistRemove(article){
   if (!confirm('Убрать артикул '+article+' из ЧС?')) return;
   var res = await api('/api/blacklist/'+article, {method:'DELETE'});
   if (res) { toast('Удалено'); handleRoute() }
+}
+
+// ─── PRICE ALERTS ────────────────────────────────────────────
+route('alerts', async function(args, view){
+  setCrumbs([{text:'Аномалии цен'}]);
+  var list = await api('/api/alerts?only_open=true&limit=100');
+  if (!list) return;
+
+  view.innerHTML =
+    '<div class="h1">Аномалии цен <span class="badge">'+list.length+'</span></div>'+
+
+    '<div class="section">'+
+      '<div class="h2">Открытые алерты</div>'+
+      '<div class="hint">Товары у которых закупочная цена изменилась резче порога. Пока алерт открыт — цена «заморожена» на старом значении, товар в фид выгружается по прежней цене.</div>'+
+
+      (list.length === 0 ? '<div class="muted" style="padding:20px;text-align:center">Всё спокойно — аномалий нет</div>' :
+        '<table class="mt"><thead><tr><th>#</th><th>Артикул</th><th>Название</th><th class="text-right">Было</th><th class="text-right">Стало</th><th class="text-right">Δ</th><th>Когда</th><th>Решение</th></tr></thead>'+
+        '<tbody>'+list.map(function(a){
+          var deltaCls = a.pct_change < 0 ? 'text-red' : 'text-green';
+          var sign = a.pct_change > 0 ? '+' : '';
+          return '<tr>'+
+            '<td>'+a.id+'</td>'+
+            '<td>'+a.article+'</td>'+
+            '<td>'+esc(a.name||'—')+'</td>'+
+            '<td class="text-right">'+fmt(a.old_price)+'</td>'+
+            '<td class="text-right">'+fmt(a.new_price)+'</td>'+
+            '<td class="text-right '+deltaCls+'"><b>'+sign+a.pct_change+'%</b></td>'+
+            '<td class="muted">'+esc(a.detected_at.slice(0,19))+'</td>'+
+            '<td>'+
+              '<button class="green sm" onclick="resolveAlert('+a.id+',\'unfreeze\')" title="Принять новую цену и разморозить товар">✓ Принять</button> '+
+              '<button class="ghost sm" onclick="resolveAlert('+a.id+',\'ignore\')" title="Игнорировать, оставить замороженной">Игнорировать</button>'+
+            '</td>'+
+          '</tr>';
+        }).join('')+
+        '</tbody></table>'
+      )+
+    '</div>';
+});
+
+async function resolveAlert(id, action){
+  var r = await api('/api/alerts/'+id+'/resolve', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action: action})
+  });
+  if (r) { toast(action==='unfreeze'?'Цена принята':'Проигнорировано'); handleRoute(); refreshSidebar() }
 }
 
 // ─── boot ────────────────────────────────────────────────────
