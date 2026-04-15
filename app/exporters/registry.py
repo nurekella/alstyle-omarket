@@ -7,6 +7,7 @@ FEEDS = [
         "enabled": True,
         "target": "OMarket.kz (аккаунт Top1)",
         "site": None,
+        "strict_xsd": False,
     },
     {
         "id": "omarket_acr",
@@ -16,15 +17,17 @@ FEEDS = [
         "enabled": True,
         "target": "OMarket.kz (аккаунт АЦР)",
         "site": None,
+        "strict_xsd": False,
     },
     {
         "id": "kaspi",
         "name": "Kaspi",
-        "format": "Kaspi XML",
+        "format": "Kaspi XML (strict)",
         "url_path": "/kaspi-feed.xml",
         "enabled": True,
         "target": "Kaspi.kz",
         "site": "https://kaspi.kz/",
+        "strict_xsd": True,
     },
     {
         "id": "skstore",
@@ -34,6 +37,7 @@ FEEDS = [
         "enabled": False,
         "target": "skstore.kz",
         "site": "https://skstore.kz/",
+        "strict_xsd": False,
     },
 ]
 

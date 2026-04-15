@@ -6,6 +6,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from sqlalchemy import select
 
 from app.config import get_settings
+from app.exporters.registry import FEEDS_BY_ID
 from app.feeds_config import get_feed_config, is_feed_configured
 from app.models import async_session, Product, Category, Blacklist
 
@@ -59,6 +60,8 @@ def _apply_commission(price: float, commission_pct: float) -> int:
 
 async def generate_feed_with_count(feed_id: str = "omarket") -> tuple[str, int]:
     cfg = await get_feed_config(feed_id)
+    meta = FEEDS_BY_ID.get(feed_id) or {}
+    strict = bool(meta.get("strict_xsd"))
 
     # If feed isn't configured, return a minimal "not configured" document
     # so an accidental external request doesn't get a crash or stale feed.
@@ -123,7 +126,10 @@ async def generate_feed_with_count(feed_id: str = "omarket") -> tuple[str, int]:
             if brand and brand.lower() not in {"no name", "noname", "no brand", "unknown", "-"}:
                 SubElement(offer, "brand").text = brand
 
-            if p.article_pn:
+            # productCode / barcode are NOT in strict Kaspi XSD — include
+            # them only for non-strict feeds (OMarket accepts them and
+            # uses them for auto-matching to catalog).
+            if not strict and p.article_pn:
                 code = str(p.article_pn).strip()
                 if code:
                     SubElement(offer, "productCode").text = code
@@ -140,7 +146,7 @@ async def generate_feed_with_count(feed_id: str = "omarket") -> tuple[str, int]:
             final_price = _apply_commission(p.price_omarket, commission)
             SubElement(offer, "price").text = str(final_price)
 
-            if p.barcode:
+            if not strict and p.barcode:
                 SubElement(offer, "barcode").text = str(p.barcode).strip()
 
             offers_count += 1
