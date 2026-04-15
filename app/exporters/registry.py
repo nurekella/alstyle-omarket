@@ -1,11 +1,20 @@
 FEEDS = [
     {
         "id": "omarket",
-        "name": "OMarket",
+        "name": "OMarket Top1",
         "format": "Kaspi XML",
         "url_path": "/omarket-feed.xml",
         "enabled": True,
-        "target": "OMarket.kz",
+        "target": "OMarket.kz (аккаунт Top1)",
+        "site": None,
+    },
+    {
+        "id": "omarket_acr",
+        "name": "OMarket АЦР",
+        "format": "Kaspi XML",
+        "url_path": "/omarket-acr-feed.xml",
+        "enabled": True,
+        "target": "OMarket.kz (аккаунт АЦР)",
         "site": None,
     },
     {
