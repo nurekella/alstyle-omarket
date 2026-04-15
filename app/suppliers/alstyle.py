@@ -11,6 +11,7 @@ from tenacity import (
     retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log,
 )
 
+from app.brands import extract_brand
 from app.config import get_settings
 from app.models import async_session, Product, Category, SyncLog, Setting, PriceAlert
 from app.pricing import build_category_markup_map
@@ -111,9 +112,15 @@ async def fetch_products_page(client: httpx.AsyncClient, offset: int = 0, modifi
     return await _get(client, f"{settings.alstyle_api_url}/elements-pagination", params)
 
 
+# Bump this when transformation logic changes (brand extractor, etc.) so
+# existing hashes get invalidated and the next sync rewrites enriched fields.
+_HASH_VERSION = "v2"
+
+
 def _source_hash(p: dict) -> str:
     """Stable hash of fields we actually care about for change detection."""
     key = {
+        "_v": _HASH_VERSION,
         "name": p.get("name"),
         "price1": p.get("price1"),
         "price2": p.get("price2"),
@@ -142,6 +149,10 @@ def _product_row(p: dict, markup: float, markup_map: dict[int, float] | None = N
             json.dumps(p["images"]) if isinstance(p["images"], list) else str(p["images"])
         )
 
+    brand = (p.get("brand") or "").strip() or None
+    if not brand:
+        brand = extract_brand(p.get("name") or p.get("full_name") or "")
+
     return {
         "article": p["article"],
         "article_pn": p.get("article_pn"),
@@ -149,7 +160,7 @@ def _product_row(p: dict, markup: float, markup_map: dict[int, float] | None = N
         "full_name": p.get("full_name"),
         "description": p.get("description"),
         "category_id": p.get("category"),
-        "brand": p.get("brand"),
+        "brand": brand,
         "price_dealer": price_dealer,
         "price_retail": p.get("price2"),
         "price_omarket": price_omarket,

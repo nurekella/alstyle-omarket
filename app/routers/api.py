@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 
 from app.config import get_settings
+from app.brands import extract_brand
 from app.exporters import cache_info, invalidate_cache
 from app.exporters.kaspi import generate_kaspi_feed_with_count
 from app.exporters.registry import FEEDS, FEEDS_BY_ID
@@ -48,6 +49,24 @@ async def health(request: Request):
         frozen = (await session.execute(
             select(func.count(Product.article)).where(Product.price_frozen == True)
         )).scalar() or 0
+        with_brand = (await session.execute(
+            select(func.count(Product.article))
+            .where(Product.is_active == True)
+            .where(Product.brand.isnot(None))
+            .where(Product.brand != "")
+        )).scalar() or 0
+        with_pn = (await session.execute(
+            select(func.count(Product.article))
+            .where(Product.is_active == True)
+            .where(Product.article_pn.isnot(None))
+            .where(Product.article_pn != "")
+        )).scalar() or 0
+        with_barcode = (await session.execute(
+            select(func.count(Product.article))
+            .where(Product.is_active == True)
+            .where(Product.barcode.isnot(None))
+            .where(Product.barcode != "")
+        )).scalar() or 0
         last = (await session.execute(
             select(SyncLog).order_by(desc(SyncLog.id)).limit(1)
         )).scalar_one_or_none()
@@ -65,6 +84,13 @@ async def health(request: Request):
         "min_dealer_price": float(await get_setting("min_dealer_price", "0") or 0),
         "price_anomaly_pct": float(await get_setting("price_anomaly_pct", "50") or 50),
         "commission_omarket": float(await get_setting("commission_omarket", "0") or 0),
+        "matching_coverage": {
+            "with_brand": with_brand,
+            "with_product_code": with_pn,
+            "with_barcode": with_barcode,
+            "brand_pct": round(with_brand / in_stock * 100, 1) if in_stock else 0,
+            "barcode_pct": round(with_barcode / in_stock * 100, 1) if in_stock else 0,
+        },
         "last_sync": {
             "id": last.id,
             "status": last.status,
@@ -553,6 +579,36 @@ async def resolve_alert(alert_id: int, body: ResolveAlert, request: Request):
         await session.commit()
     invalidate_cache()
     return {"ok": True, "action": body.action}
+
+
+# ───── Tools ─────
+
+@router.post("/tools/rebuild-brands")
+async def rebuild_brands(request: Request):
+    """
+    Re-run brand extraction on all products that have an empty/placeholder
+    brand. Does not touch Al-Style; uses name/full_name from DB.
+    """
+    denied = require_auth(request)
+    if denied:
+        return denied
+    placeholders = {"", "no name", "noname", "no brand", "unknown", "-"}
+    updated = 0
+    scanned = 0
+    async with async_session() as session:
+        products = (await session.execute(select(Product))).scalars().all()
+        for p in products:
+            scanned += 1
+            current = (p.brand or "").strip().lower()
+            if current and current not in placeholders:
+                continue
+            candidate = extract_brand(p.name or p.full_name or "")
+            if candidate:
+                p.brand = candidate
+                updated += 1
+        await session.commit()
+    invalidate_cache()
+    return {"ok": True, "scanned": scanned, "updated": updated}
 
 
 # ───── Excel export ─────

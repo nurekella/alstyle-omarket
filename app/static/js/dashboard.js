@@ -530,6 +530,20 @@ route('settings', async function(args, view){
     '</div>'+
 
     '<div class="section">'+
+      '<div class="h2">Качество данных для маркетплейсов</div>'+
+      '<div class="hint">Чем больше товаров с брендом, артикулом производителя и штрих-кодом — тем больше OMarket/Kaspi смэтчат автоматически. Ниже — текущее покрытие от числа активных товаров в наличии.</div>'+
+      '<div class="grid" style="margin-top:12px">'+
+        card('С brand', (h.matching_coverage?h.matching_coverage.brand_pct:0)+'%', fmt(h.matching_coverage?h.matching_coverage.with_brand:0)+' товаров')+
+        card('С barcode', (h.matching_coverage?h.matching_coverage.barcode_pct:0)+'%', fmt(h.matching_coverage?h.matching_coverage.with_barcode:0)+' товаров')+
+        card('С productCode', fmt(h.matching_coverage?h.matching_coverage.with_product_code:0), 'MPN из Al-Style')+
+      '</div>'+
+      '<div class="row" style="margin-top:14px">'+
+        '<button onclick="rebuildBrands()">🔧 Перепривязать бренды по названиям</button>'+
+        '<span class="muted" style="font-size:11px">Пройдёт по всем товарам без brand и извлечёт из названия по словарю ~250 марок.</span>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="section">'+
       '<div class="h2">Экспорт</div>'+
       '<div class="hint">Excel со всеми товарами, ценами (дилер/OMarket), рассчитанной наценкой и статусом активности.</div>'+
       '<div class="row" style="margin-top:10px">'+
@@ -537,6 +551,12 @@ route('settings', async function(args, view){
       '</div>'+
     '</div>';
 });
+
+async function rebuildBrands(){
+  if (!confirm('Пройти по всем товарам без brand и попытаться извлечь из названия?')) return;
+  var r = await api('/api/tools/rebuild-brands', {method:'POST'});
+  if (r) { toast('Проверено '+r.scanned+', обогащено '+r.updated); handleRoute() }
+}
 
 async function setMarkup(){
   var pct = parseFloat(document.getElementById('markup').value);

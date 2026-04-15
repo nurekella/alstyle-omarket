@@ -119,8 +119,16 @@ async def generate_kaspi_feed_with_count() -> tuple[str, int]:
             sku = str(p.article)[:20]
             offer = SubElement(offers_el, "offer", sku=sku)
             SubElement(offer, "model").text = p.name
-            if p.brand:
-                SubElement(offer, "brand").text = p.brand
+
+            brand = (p.brand or "").strip()
+            # "No name" / "No brand" / unknown placeholders don't help matching
+            if brand and brand.lower() not in {"no name", "noname", "no brand", "unknown", "-"}:
+                SubElement(offer, "brand").text = brand
+
+            if p.article_pn:
+                code = str(p.article_pn).strip()
+                if code:
+                    SubElement(offer, "productCode").text = code
 
             availabilities = SubElement(offer, "availabilities")
             qty = _parse_quantity(p.quantity)
