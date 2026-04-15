@@ -1,0 +1,11 @@
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,system-ui,sans-serif;background:#0f1117;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#1a1d27;border:1px solid #2a2d37;border-radius:16px;padding:40px;width:360px}
+h1{font-size:20px;font-weight:500;margin-bottom:8px;color:#fff}
+.sub{font-size:13px;color:#666;margin-bottom:24px}
+label{font-size:13px;color:#888;display:block;margin-bottom:6px}
+input{width:100%;background:#0f1117;border:1px solid #2a2d37;border-radius:8px;padding:12px 14px;color:#fff;font-size:15px;margin-bottom:16px}
+input:focus{outline:none;border-color:#3b82f6}
+button{width:100%;background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:12px;font-size:15px;cursor:pointer;font-weight:500}
+button:hover{background:#2563eb}
+.err{color:#f87171;font-size:13px;margin-bottom:12px;display:none}

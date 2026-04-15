@@ -21,10 +21,12 @@
 ## Стек
 
 - **Backend**: Python 3.12, FastAPI, SQLAlchemy async
-- **БД**: SQLite (aiosqlite)
+- **БД**: SQLite (aiosqlite, WAL-режим)
 - **Web**: Caddy (auto SSL)
 - **Логи**: Dozzle
 - **Деплой**: Docker Compose, GitHub Actions
+- **Защита**: slowapi rate-limit, HMAC-сессии (timing-safe), gzip
+- **Надёжность**: tenacity retry для Al-Style API, bulk upsert
 
 ## Быстрый старт
 
@@ -83,9 +85,9 @@ STORE_IDS='["POS00000001","POS00000002"]'
 # Домен
 FEED_DOMAIN=pressplay.kz
 
-# Авторизация
-ADMIN_PASSWORD=your-password
-SECRET_KEY=your-secret-key
+# Авторизация (SECRET_KEY: `openssl rand -hex 32`)
+ADMIN_PASSWORD=your-strong-password
+SECRET_KEY=your-random-hex-secret
 
 # Логи
 DOZZLE_USER=admin

@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, Text, DateTime, func, Index,
+    Column, Integer, String, Float, Boolean, Text, DateTime, func, Index, event,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -78,11 +78,23 @@ class Setting(Base):
     value = Column(Text, nullable=False)
 
 
-# --- Engine & session (async SQLite) ---
-
 settings = get_settings()
-engine = create_async_engine(f"sqlite+aiosqlite:///{settings.db_path}", echo=False)
+engine = create_async_engine(
+    f"sqlite+aiosqlite:///{settings.db_path}",
+    echo=False,
+    pool_pre_ping=True,
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _sqlite_pragmas(dbapi_conn, _):
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.execute("PRAGMA foreign_keys=ON")
+    cur.execute("PRAGMA busy_timeout=5000")
+    cur.close()
 
 
 async def init_db():

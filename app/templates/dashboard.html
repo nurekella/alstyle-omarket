@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PressPlay — Панель</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="sidebar">
+      <div class="sb-title">Категории <button class="sm" onclick="toggleAllCats()">Вкл/Выкл все</button></div>
+      <div id="search-cat-wrap">
+        <input type="text" id="cat-search" placeholder="Поиск категорий..." oninput="filterCats()" style="width:100%;margin-bottom:8px;font-size:12px;padding:6px 10px">
+      </div>
+      <div class="cat-tree" id="cat-tree"></div>
+    </div>
+
+    <div class="main">
+      <div class="header">
+        <h1>PressPlay.kz</h1>
+        <span class="logout" onclick="logout()">Выйти</span>
+      </div>
+
+      <div class="grid" id="stats"></div>
+
+      <div class="section">
+        <h2>Наценка</h2>
+        <div class="row">
+          <div><input type="number" id="markup" min="0" max="200" step="1" value="20"> <span style="color:#888;font-size:13px">%</span></div>
+          <button onclick="setMarkup()">Применить</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Синхронизация</h2>
+        <div class="row">
+          <button class="green" onclick="triggerSync()">Запустить</button>
+          <button onclick="loadAll()">Обновить</button>
+        </div>
+        <table class="mt">
+          <thead><tr><th>#</th><th>Статус</th><th>Начало</th><th>Товаров</th><th>Ошибка</th></tr></thead>
+          <tbody id="logs-body"></tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <h2>Товары <span id="product-count" style="font-size:12px;color:#888"></span></h2>
+        <input type="text" id="search" placeholder="Поиск по названию..." oninput="debounceSearch()">
+        <table class="mt">
+          <thead><tr><th>Артикул</th><th>Название</th><th>Бренд</th><th class="text-right">Дилер</th><th class="text-right">OMarket</th><th class="text-right">Остаток</th></tr></thead>
+          <tbody id="products-body"></tbody>
+        </table>
+        <div class="mt row">
+          <button onclick="loadProducts(currentOffset-50)" id="prev-btn" disabled>←</button>
+          <span id="page-info" style="font-size:12px;color:#888"></span>
+          <button onclick="loadProducts(currentOffset+50)" id="next-btn">→</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

@@ -1,11 +1,14 @@
 import json
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from tenacity import (
+    retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log,
+)
 
 from app.config import get_settings
 from app.models import async_session, Product, Category, SyncLog, Setting
@@ -15,53 +18,73 @@ settings = get_settings()
 
 BATCH_SIZE = 250
 ADDITIONAL_FIELDS = "description,brand,images,barcode,warranty,weight"
+DB_CHUNK = 500
+
+
+_retry_http = retry(
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type((httpx.HTTPError, httpx.TransportError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+
+
+@_retry_http
+async def _get(client: httpx.AsyncClient, url: str, params: dict) -> dict:
+    resp = await client.get(url, params=params)
+    if resp.status_code in (429, 502, 503, 504):
+        raise httpx.HTTPError(f"retryable status {resp.status_code}")
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def fetch_categories():
-    """Загрузить категории из Al-Style с вычислением parent_id из Nested Sets."""
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
+        categories = await _get(
+            client,
             f"{settings.alstyle_api_url}/categories",
-            params={"access-token": settings.alstyle_access_token},
+            {"access-token": settings.alstyle_access_token},
         )
-        resp.raise_for_status()
-        categories = resp.json()
 
-    # Сортируем по left для вычисления parent_id
     categories.sort(key=lambda c: c.get("left", 0))
 
-    # Вычисляем parent_id из nested sets (left/right)
-    stack = []  # [(id, right)]
+    stack = []
     parent_map = {}
     for cat in categories:
         left = cat.get("left", 0)
         right = cat.get("right", 0)
-        # Убираем из стека всё, чей right < текущего left
         while stack and stack[-1][1] < left:
             stack.pop()
         parent_map[cat["id"]] = stack[-1][0] if stack else None
         stack.append((cat["id"], right))
 
+    rows = [
+        {
+            "id": c["id"],
+            "name": c["name"],
+            "level": c.get("level", 1),
+            "left_key": c.get("left", 0),
+            "right_key": c.get("right", 0),
+            "elements_count": c.get("elements", 0),
+            "parent_id": parent_map.get(c["id"]),
+        }
+        for c in categories
+    ]
+
     async with async_session() as session:
-        for cat in categories:
-            cat_id = cat["id"]
-            stmt = sqlite_insert(Category).values(
-                id=cat_id,
-                name=cat["name"],
-                level=cat.get("level", 1),
-                left_key=cat.get("left", 0),
-                right_key=cat.get("right", 0),
-                elements_count=cat.get("elements", 0),
-                parent_id=parent_map.get(cat_id),
-            ).on_conflict_do_update(
+        for i in range(0, len(rows), DB_CHUNK):
+            chunk = rows[i : i + DB_CHUNK]
+            stmt = sqlite_insert(Category).values(chunk)
+            stmt = stmt.on_conflict_do_update(
                 index_elements=["id"],
                 set_={
-                    "name": cat["name"],
-                    "level": cat.get("level", 1),
-                    "left_key": cat.get("left", 0),
-                    "right_key": cat.get("right", 0),
-                    "elements_count": cat.get("elements", 0),
-                    "parent_id": parent_map.get(cat_id),
+                    "name": stmt.excluded.name,
+                    "level": stmt.excluded.level,
+                    "left_key": stmt.excluded.left_key,
+                    "right_key": stmt.excluded.right_key,
+                    "elements_count": stmt.excluded.elements_count,
+                    "parent_id": stmt.excluded.parent_id,
                 },
             )
             await session.execute(stmt)
@@ -72,10 +95,10 @@ async def fetch_categories():
 
 
 async def fetch_products_page(client: httpx.AsyncClient, offset: int = 0):
-    """Получить одну страницу товаров."""
-    resp = await client.get(
+    return await _get(
+        client,
         f"{settings.alstyle_api_url}/elements-pagination",
-        params={
+        {
             "access-token": settings.alstyle_access_token,
             "limit": BATCH_SIZE,
             "offset": offset,
@@ -83,65 +106,62 @@ async def fetch_products_page(client: httpx.AsyncClient, offset: int = 0):
             "additional_fields": ADDITIONAL_FIELDS,
         },
     )
-    resp.raise_for_status()
-    return resp.json()
+
+
+def _product_row(p: dict, markup: float) -> dict:
+    price_dealer = p.get("price1")
+    price_omarket = round(price_dealer * markup) if price_dealer and price_dealer > 1 else None
+
+    images_json = None
+    if p.get("images"):
+        images_json = (
+            json.dumps(p["images"]) if isinstance(p["images"], list) else str(p["images"])
+        )
+
+    return {
+        "article": p["article"],
+        "article_pn": p.get("article_pn"),
+        "name": p["name"],
+        "full_name": p.get("full_name"),
+        "description": p.get("description"),
+        "category_id": p.get("category"),
+        "brand": p.get("brand"),
+        "price_dealer": price_dealer,
+        "price_retail": p.get("price2"),
+        "price_omarket": price_omarket,
+        "quantity": str(p.get("quantity", 0)),
+        "is_new": bool(p.get("isnew")),
+        "barcode": p.get("barcode"),
+        "warranty": p.get("warranty"),
+        "weight": p.get("weight"),
+        "images": images_json,
+        "quantity_markdown": p.get("quantityMarkdown", 0),
+        "price_markdown": p.get("priceMarkdown"),
+        "is_active": True,
+    }
 
 
 async def upsert_products(products: list[dict], markup: float) -> int:
-    """Вставить/обновить товары в БД с наценкой."""
-    count = 0
+    if not products:
+        return 0
+
+    rows = [_product_row(p, markup) for p in products]
 
     async with async_session() as session:
-        for p in products:
-            price_dealer = p.get("price1")
-            price_omarket = None
-            if price_dealer and price_dealer > 1:
-                price_omarket = round(price_dealer * markup)
-
-            images_json = None
-            if "images" in p and p["images"]:
-                images_json = (
-                    json.dumps(p["images"])
-                    if isinstance(p["images"], list)
-                    else str(p["images"])
-                )
-
-            values = {
-                "article": p["article"],
-                "article_pn": p.get("article_pn"),
-                "name": p["name"],
-                "full_name": p.get("full_name"),
-                "description": p.get("description"),
-                "category_id": p.get("category"),
-                "brand": p.get("brand"),
-                "price_dealer": price_dealer,
-                "price_retail": p.get("price2"),
-                "price_omarket": price_omarket,
-                "quantity": str(p.get("quantity", 0)),
-                "is_new": bool(p.get("isnew")),
-                "barcode": p.get("barcode"),
-                "warranty": p.get("warranty"),
-                "weight": p.get("weight"),
-                "images": images_json,
-                "quantity_markdown": p.get("quantityMarkdown", 0),
-                "price_markdown": p.get("priceMarkdown"),
-                "is_active": True,
-            }
-
-            stmt = sqlite_insert(Product).values(**values).on_conflict_do_update(
+        for i in range(0, len(rows), DB_CHUNK):
+            chunk = rows[i : i + DB_CHUNK]
+            stmt = sqlite_insert(Product).values(chunk)
+            stmt = stmt.on_conflict_do_update(
                 index_elements=["article"],
-                set_={k: v for k, v in values.items() if k != "article"},
+                set_={c.name: stmt.excluded[c.name] for c in Product.__table__.columns if c.name != "article"},
             )
             await session.execute(stmt)
-            count += 1
-
         await session.commit()
 
-    return count
+    return len(rows)
 
 
 async def run_sync():
-    """Полный цикл синхронизации."""
     logger.info("=== Начало синхронизации ===")
 
     async with async_session() as session:
@@ -154,7 +174,6 @@ async def run_sync():
         await fetch_categories()
         await asyncio.sleep(6)
 
-        # Read markup from DB settings
         async with async_session() as session:
             result = await session.execute(
                 select(Setting).where(Setting.key == "markup_multiplier")
@@ -201,7 +220,7 @@ async def run_sync():
                 .where(SyncLog.id == log_id)
                 .values(
                     status="success",
-                    finished_at=datetime.now(),
+                    finished_at=datetime.now(timezone.utc),
                     products_fetched=total_fetched,
                     products_updated=total_updated,
                 )
@@ -221,7 +240,7 @@ async def run_sync():
                 .where(SyncLog.id == log_id)
                 .values(
                     status="error",
-                    finished_at=datetime.now(),
+                    finished_at=datetime.now(timezone.utc),
                     error_message=str(e),
                 )
             )
