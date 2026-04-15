@@ -6,6 +6,7 @@ from slowapi.util import get_remote_address
 
 from app.security import TOKEN_NAME, check_auth, make_token, verify_password
 from app.templating import templates
+from app.version import ASSET_TAG
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -19,7 +20,7 @@ class LoginForm(BaseModel):
 async def login_page(request: Request):
     if check_auth(request):
         return RedirectResponse("/admin", 302)
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse("login.html", {"request": request, "v": ASSET_TAG})
 
 
 @router.post("/admin/login")
@@ -46,4 +47,4 @@ async def logout():
 async def dashboard(request: Request):
     if not check_auth(request):
         return RedirectResponse("/admin/login", 302)
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse("dashboard.html", {"request": request, "v": ASSET_TAG})

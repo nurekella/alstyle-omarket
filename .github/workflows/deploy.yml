@@ -15,6 +15,14 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
           script: |
+            set -e
             cd /opt/al-style-omarket
-            git pull origin main
-            docker compose up -d --build
+            git fetch origin main
+            git reset --hard origin/main
+            echo ">>> commit: $(git rev-parse --short HEAD)"
+            docker compose build app
+            docker compose up -d --force-recreate app
+            sleep 5
+            docker compose ps
+            echo ">>> last logs:"
+            docker compose logs app --tail=20

@@ -45,7 +45,9 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
-app = FastAPI(title="PressPlay.kz", version="2.2.0", lifespan=lifespan)
+from app.version import VERSION
+
+app = FastAPI(title="PressPlay.kz", version=VERSION, lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
