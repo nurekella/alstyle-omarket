@@ -5,7 +5,8 @@ FEEDS = [
         "format": "Kaspi XML",
         "url_path": "/omarket-feed.xml",
         "enabled": True,
-        "target": "skstore.kz / OMarket.kz",
+        "target": "OMarket.kz",
+        "site": None,
     },
     {
         "id": "kaspi",
@@ -13,7 +14,17 @@ FEEDS = [
         "format": "Kaspi XML",
         "url_path": None,
         "enabled": False,
-        "target": "skstore.kz / Kaspi.kz",
+        "target": "Kaspi.kz",
+        "site": "https://kaspi.kz/",
+    },
+    {
+        "id": "skstore",
+        "name": "SK Store",
+        "format": "—",
+        "url_path": None,
+        "enabled": False,
+        "target": "skstore.kz",
+        "site": "https://skstore.kz/",
     },
 ]
 

@@ -86,9 +86,9 @@ async function refreshSidebar(){
   var sup = document.getElementById('nav-suppliers');
   sup.innerHTML = state.suppliers.map(function(s){
     if (!s.enabled){
-      return '<a class="nav-item soon" data-route="supplier/'+s.id+'">'+
+      return '<div class="nav-item soon" title="'+esc(s.url||'')+'">'+
         '<span class="nav-ico">📦</span>'+esc(s.name)+
-        '<span class="soon-tag">скоро</span></a>';
+        '<span class="soon-tag">Soon</span></div>';
     }
     var dot = s.last_sync_status === 'success' ? 'ok' : (s.last_sync_status === 'error' ? 'err' : (s.last_sync_status === 'running' ? 'warn' : 'off'));
     return '<a class="nav-item" data-route="supplier/'+s.id+'">'+
@@ -99,9 +99,9 @@ async function refreshSidebar(){
   var fd = document.getElementById('nav-feeds');
   fd.innerHTML = state.feeds.map(function(f){
     if (!f.enabled){
-      return '<a class="nav-item soon" data-route="feed/'+f.id+'">'+
+      return '<div class="nav-item soon" title="'+esc(f.site||f.target||'')+'">'+
         '<span class="nav-ico">📤</span>'+esc(f.name)+
-        '<span class="soon-tag">скоро</span></a>';
+        '<span class="soon-tag">Soon</span></div>';
     }
     return '<a class="nav-item" data-route="feed/'+f.id+'">'+
       '<span class="nav-ico">📤</span>'+esc(f.name)+
@@ -156,11 +156,11 @@ route('home', async function(args, view){
 
 function supplierCard(s){
   if (!s.enabled){
-    return '<div class="supplier-card soon" onclick="navigate(\'#/supplier/'+s.id+'\')" title="Откроется страница-заглушка">'+
+    return '<div class="supplier-card soon">'+
       '<div class="supplier-icon" style="background:linear-gradient(135deg,#555,#333)">'+s.name.substring(0,2).toUpperCase()+'</div>'+
       '<div class="supplier-info">'+
-        '<div class="supplier-name">'+esc(s.name)+' <span class="badge soon">скоро</span></div>'+
-        '<div class="supplier-stats">'+esc(s.url||'')+'</div>'+
+        '<div class="supplier-name">'+esc(s.name)+' <span class="badge soon">Soon</span></div>'+
+        '<div class="supplier-stats">'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" style="color:#8b8fa7">'+esc(s.url)+'</a>':'')+'</div>'+
       '</div>'+
       '<button class="ghost sm" disabled>—</button>'+
     '</div>';
@@ -184,10 +184,9 @@ function feedMini(f){
   if (!f.enabled){
     return '<div class="feed-card soon">'+
       '<div class="feed-head">'+
-        '<div class="feed-title">📤 '+esc(f.name)+' <span class="badge soon">скоро</span></div>'+
-        '<button class="ghost sm" onclick="navigate(\'#/feed/'+f.id+'\')">Подробнее</button>'+
+        '<div class="feed-title">📤 '+esc(f.name)+' <span class="badge soon">Soon</span></div>'+
       '</div>'+
-      '<div class="help">Целевая площадка: '+esc(f.target||'')+'. Формат: '+esc(f.format||'')+'.</div>'+
+      '<div class="help">Целевая площадка: '+(f.site?'<a href="'+esc(f.site)+'" target="_blank" style="color:#8b8fa7">'+esc(f.target||f.site)+'</a>':esc(f.target||'—'))+' · Формат: '+esc(f.format||'—')+'</div>'+
     '</div>';
   }
   return '<div class="feed-card">'+

@@ -323,6 +323,7 @@ async def list_feeds(request: Request):
             "absolute_url": f"https://{settings.feed_domain}{f['url_path']}" if f["url_path"] else None,
             "enabled": f["enabled"],
             "target": f.get("target"),
+            "site": f.get("site"),
             "store_ids": settings.store_ids if f["enabled"] else [],
             "cached": False,
             "age_seconds": None,
